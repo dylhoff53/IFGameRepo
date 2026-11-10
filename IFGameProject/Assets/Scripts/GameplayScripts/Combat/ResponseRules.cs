@@ -24,11 +24,21 @@ public class ResponseRules : ScriptableObject
     [Tooltip("If true, any reaction to a feint counts as a WrongAction. If false, reactions to feints are harmless.")]
     public bool punishFeintReactions = true;
 
-    public ResponseResult Evaluate(CombatAction action, NoteType type, AttackDirection direction)
+    public ResponseResult Evaluate(CombatAction action, CombatNote note)
     {
+        NoteType type = note.type;
+        AttackDirection direction = note.direction;
+
         if (type == NoteType.Feint)
         {
             return punishFeintReactions ? ResponseResult.Invalid : ResponseResult.Valid(ResponseEffect.None);
+        }
+
+        if (action.IsSwing())
+        {
+            return note.canBeParried && action.ParriesDirection() == direction
+                ? ResponseResult.Valid(ResponseEffect.Parried)
+                : ResponseResult.Invalid;
         }
 
         switch (action)
@@ -41,11 +51,6 @@ public class ResponseRules : ScriptableObject
                 return IsDodgeDirectionValid(action, type, direction)
                     ? ResponseResult.Valid(ResponseEffect.Dodged)
                     : ResponseResult.Invalid;
-
-            case CombatAction.Parry:
-                return type == NoteType.Heavy || type == NoteType.Unblockable
-                    ? ResponseResult.Invalid
-                    : ResponseResult.Valid(ResponseEffect.Staggered);
 
             default:
                 return ResponseResult.Invalid;

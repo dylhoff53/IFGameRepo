@@ -10,11 +10,8 @@ public class PlayerCombatInput : MonoBehaviour
 {
     [SerializeField] private CombatClock clock;
 
-    [Tooltip("Seconds a press is held and retried if no note is in range yet.")]
+    [Tooltip("Seconds a press is held and retried if an attack is incoming but not in range yet. Presses with nothing incoming, like swings during a stagger, go through immediately.")]
     [Min(0f)] [SerializeField] private float inputBuffer = 0.08f;
-
-    [Tooltip("Attack is not a defensive answer, so buffering it only delays hits during stagger windows.")]
-    [SerializeField] private bool bufferAttacks;
 
     [SerializeField] private bool logInputs;
 
@@ -27,21 +24,40 @@ public class PlayerCombatInput : MonoBehaviour
     /// <summary>Fired for every press that reaches the judge, just before it is judged, whether it lands on a note or whiffs.</summary>
     public event Action<CombatAction, double> OnActionSubmitted;
 
+    /// <summary>Fired when the player lets go of a held action, but not when the hold was cancelled by <see cref="CancelHold"/>.</summary>
+    public event Action<CombatAction> OnHoldReleased;
+
+    public bool IsHolding { get; private set; }
+
     private bool hasBuffered;
     private CombatAction bufferedAction;
     private double bufferedTime;
+    private CombatAction heldAction;
 
-    public void OnBlock(InputAction.CallbackContext context) => Handle(context, CombatAction.Block);
+    /// <summary>Block is held rather than tapped, so the action needs to report release (a plain Button with no Press Only interaction).</summary>
+    public void OnBlock(InputAction.CallbackContext context) => HandleHold(context, CombatAction.Block);
 
     public void OnDodgeLeft(InputAction.CallbackContext context) => Handle(context, CombatAction.DodgeLeft);
 
     public void OnDodgeRight(InputAction.CallbackContext context) => Handle(context, CombatAction.DodgeRight);
 
-    public void OnParry(InputAction.CallbackContext context) => Handle(context, CombatAction.Parry);
+    public void OnRightSwing(InputAction.CallbackContext context) => Handle(context, CombatAction.RightSwing);
 
-    public void OnAttack(InputAction.CallbackContext context) => Handle(context, CombatAction.Attack);
+    public void OnLeftSwing(InputAction.CallbackContext context) => Handle(context, CombatAction.LeftSwing);
+
+    public void OnRisingSwing(InputAction.CallbackContext context) => Handle(context, CombatAction.RisingSwing);
+
+    public void OnOverheadSwing(InputAction.CallbackContext context) => Handle(context, CombatAction.OverheadSwing);
 
     public void ClearBuffer() => hasBuffered = false;
+
+    /// <summary>Drops the current hold, e.g. when the guard breaks. The button has to be pressed again to resume.</summary>
+    public void CancelHold()
+    {
+        if (!IsHolding) return;
+        IsHolding = false;
+        Judge?.EndHold();
+    }
 
     private void Awake()
     {
@@ -75,7 +91,7 @@ public class PlayerCombatInput : MonoBehaviour
         if (Judge == null) return;
         if (CanAct != null && !CanAct(action)) return;
 
-        bool bufferable = inputBuffer > 0f && (bufferAttacks || action != CombatAction.Attack);
+        bool bufferable = inputBuffer > 0f && Judge.ActiveNotes.Count > 0;
         if (!bufferable || HasNoteInRange(now))
         {
             hasBuffered = false;
@@ -88,6 +104,35 @@ public class PlayerCombatInput : MonoBehaviour
         hasBuffered = true;
         bufferedAction = action;
         bufferedTime = now;
+    }
+
+    private void HandleHold(InputAction.CallbackContext context, CombatAction action)
+    {
+        if (context.canceled)
+        {
+            if (!IsHolding || heldAction != action) return;
+            CancelHold();
+            OnHoldReleased?.Invoke(action);
+            return;
+        }
+
+        if (!context.performed || clock == null || IsHolding) return;
+
+        double now = clock.Now;
+        if (logInputs) Debug.Log($"[Combat] {action} held at {now:F3}");
+        if (Judge == null) return;
+        if (CanAct != null && !CanAct(action)) return;
+
+        if (hasBuffered)
+        {
+            hasBuffered = false;
+            Submit(bufferedAction, bufferedTime);
+        }
+
+        IsHolding = true;
+        heldAction = action;
+        OnActionSubmitted?.Invoke(action, now);
+        Judge.BeginHold(action, now);
     }
 
     private void Submit(CombatAction action, double time)

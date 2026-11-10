@@ -49,6 +49,11 @@ public class CombatJudge
 
     public IReadOnlyList<ActiveNote> ActiveNotes => active;
 
+    /// <summary>The action currently held down, e.g. a raised block. Answers each note as it lands.</summary>
+    public CombatAction? HeldAction { get; private set; }
+
+    private double holdStartTime;
+
     public event Action<JudgeResult> OnNoteJudged;
 
     /// <summary>Fired when an action is submitted with no note in range.</summary>
@@ -87,29 +92,42 @@ public class CombatJudge
             return false;
         }
 
-        double offset = time - target.HitTime;
-        ResponseResult response = Rules.Evaluate(action, target.Note.type, target.Note.direction);
-
-        Judgment judgment;
-        if (!response.valid) judgment = Judgment.WrongAction;
-        else judgment = Windows.Evaluate(offset, action);
-
-        result = new JudgeResult
-        {
-            note = target,
-            action = action,
-            judgment = judgment,
-            response = response,
-            offset = offset
-        };
-
+        result = Answer(target, action, time - target.HitTime, false);
         Resolve(target, result);
         return true;
     }
 
-    /// <summary>Resolves every note whose window has fully passed as a Miss.</summary>
+    /// <summary>
+    /// Starts holding an action. A note that has already landed but is still in its window is answered
+    /// immediately; later notes are answered as they land, for as long as the hold lasts. Never whiffs.
+    /// </summary>
+    public void BeginHold(CombatAction action, double time)
+    {
+        HeldAction = action;
+        holdStartTime = time;
+
+        ActiveNote landed = FindTarget(time);
+        if (landed != null && landed.HitTime <= time) Submit(action, time);
+    }
+
+    public void EndHold() => HeldAction = null;
+
+    /// <summary>Answers notes that have landed while an action is held, then resolves every note whose window has fully passed as a Miss.</summary>
     public void Tick(double now)
     {
+        int index = 0;
+        while (HeldAction.HasValue && index < active.Count && active[index].HitTime <= now)
+        {
+            ActiveNote note = active[index];
+            if (note.Note.type == NoteType.Feint)
+            {
+                index++;
+                continue;
+            }
+
+            Resolve(note, Answer(note, HeldAction.Value, holdStartTime - note.HitTime, true));
+        }
+
         double window = Windows.Largest;
 
         while (active.Count > 0 && now - active[0].HitTime > window)
@@ -131,6 +149,26 @@ public class CombatJudge
     {
         foreach (ActiveNote note in active) note.Resolved = true;
         active.Clear();
+    }
+
+    /// <summary>A held action is never too early: it is Perfect if raised within the Perfect window of impact, otherwise Good.</summary>
+    private JudgeResult Answer(ActiveNote note, CombatAction action, double offset, bool held)
+    {
+        ResponseResult response = Rules.Evaluate(action, note.Note);
+
+        Judgment judgment;
+        if (!response.valid) judgment = Judgment.WrongAction;
+        else if (held) judgment = Math.Abs(offset) <= Windows.perfect ? Judgment.Perfect : Judgment.Good;
+        else judgment = Windows.Evaluate(offset, action);
+
+        return new JudgeResult
+        {
+            note = note,
+            action = action,
+            judgment = judgment,
+            response = response,
+            offset = offset
+        };
     }
 
     private ActiveNote FindTarget(double time)

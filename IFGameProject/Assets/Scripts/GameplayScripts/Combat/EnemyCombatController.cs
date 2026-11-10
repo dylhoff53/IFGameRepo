@@ -1,9 +1,11 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Plays an enemy's attack charts into a <see cref="CombatJudge"/> it owns, fires wind-up animations,
-/// and opens a stagger window (chart paused, enemy vulnerable) when the player lands a parry.
+/// and opens a stagger window (enemy vulnerable) when the player answers an attack in a way that attack can be broken by.
+/// The interrupted chart starts over once the enemy recovers.
 /// </summary>
 [DefaultExecutionOrder(-50)]
 public class EnemyCombatController : MonoBehaviour
@@ -29,17 +31,19 @@ public class EnemyCombatController : MonoBehaviour
     [Min(1)] [SerializeField] private int maxHealth = 100;
 
     [Header("Stagger")]
-    [Tooltip("Seconds the enemy stays open to attacks after a successful parry.")]
+    [Tooltip("Seconds the enemy stays open to attacks after one of its attacks is broken.")]
     [Min(0f)] [SerializeField] private float staggerDuration = 2f;
-    [Tooltip("Minimum seconds between recovering and the next wind-up starting.")]
+    [Tooltip("Minimum seconds between recovering and the restarted chart's first wind-up.")]
     [Min(0f)] [SerializeField] private float resumeGrace = 0.5f;
-    [Tooltip("Real seconds of hit-stop on a successful parry. 0 to disable.")]
-    [Min(0f)] [SerializeField] private float parryHitStop = 0.08f;
+    [Tooltip("Real seconds of hit-stop when an attack is broken. 0 to disable.")]
+    [FormerlySerializedAs("parryHitStop")]
+    [Min(0f)] [SerializeField] private float breakHitStop = 0.08f;
 
     [Header("Animator Triggers")]
     [SerializeField] private string staggerTrigger = "Stagger";
     [SerializeField] private string recoverTrigger = "Recover";
     [SerializeField] private string hurtTrigger = "Hurt";
+    [SerializeField] private string scratchTrigger = "Scratch";
     [SerializeField] private string defeatTrigger = "Defeat";
 
     [Header("Debug")]
@@ -68,7 +72,6 @@ public class EnemyCombatController : MonoBehaviour
 
     private double chartStartTime;
     private int nextNoteIndex;
-    private double staggerStartTime;
     private double staggerEndTime;
 
     private void Awake()
@@ -146,13 +149,26 @@ public class EnemyCombatController : MonoBehaviour
     {
         if (!IsVulnerable || amount <= 0) return false;
 
+        ApplyDamage(amount, hurtTrigger);
+        return true;
+    }
+
+    /// <summary>Chip damage from a swing that lands mid-fight while the enemy isn't staggered. Returns false if the hit was not allowed.</summary>
+    public bool Scratch(int amount)
+    {
+        if (State != EnemyCombatState.Attacking || amount <= 0) return false;
+
+        ApplyDamage(amount, scratchTrigger);
+        return true;
+    }
+
+    private void ApplyDamage(int amount, string trigger)
+    {
         Health = Mathf.Max(0, Health - amount);
         OnDamaged?.Invoke(amount, Health);
 
         if (Health == 0) Defeat();
-        else SetTrigger(hurtTrigger);
-
-        return true;
+        else SetTrigger(trigger);
     }
 
     private void SpawnDueNotes(double now)
@@ -217,7 +233,8 @@ public class EnemyCombatController : MonoBehaviour
             Debug.Log($"[Combat] {note.type} {note.direction} vs {action}: {result.judgment} ({result.offset * 1000:+0;-0;0} ms)", this);
         }
 
-        if (State == EnemyCombatState.Attacking && result.Success && result.response.effect == ResponseEffect.Staggered)
+        if (State == EnemyCombatState.Attacking && result.Success && result.action.HasValue
+            && result.note.Note.BreaksOn(result.action.Value))
         {
             EnterStagger();
         }
@@ -225,15 +242,13 @@ public class EnemyCombatController : MonoBehaviour
 
     private void EnterStagger()
     {
-        double now = clock.Now;
-        staggerStartTime = now;
-        staggerEndTime = now + staggerDuration;
+        staggerEndTime = clock.Now + staggerDuration;
         State = EnemyCombatState.Staggered;
 
         Judge.Clear();
         ClearPlayerBuffer();
         SetTrigger(staggerTrigger);
-        if (parryHitStop > 0f) clock.HitStop(parryHitStop);
+        if (breakHitStop > 0f) clock.HitStop(breakHitStop);
 
         OnStaggered?.Invoke(staggerDuration);
     }
@@ -243,28 +258,9 @@ public class EnemyCombatController : MonoBehaviour
         State = EnemyCombatState.Attacking;
         SetTrigger(recoverTrigger);
 
-        int phase = PhaseForHealth();
-        if (phase != PhaseIndex) StartPhase(phase, now + resumeGrace);
-        else ResumeChart(now);
+        StartPhase(PhaseForHealth(), now + resumeGrace);
 
         OnRecovered?.Invoke();
-    }
-
-    /// <summary>Shifts the chart by the time spent staggered, then pushes it back further if the next wind-up would start inside the grace period.</summary>
-    private void ResumeChart(double now)
-    {
-        chartStartTime += now - staggerStartTime;
-
-        AttackChart chart = CurrentChart;
-        if (chart == null || chart.notes.Count == 0) return;
-
-        double nextTelegraph;
-        if (nextNoteIndex < chart.notes.Count) nextTelegraph = chartStartTime + chart.notes[nextNoteIndex].TelegraphTime;
-        else if (chart.loop) nextTelegraph = chartStartTime + chart.LoopLength + chart.notes[0].TelegraphTime;
-        else return;
-
-        double earliest = now + resumeGrace;
-        if (nextTelegraph < earliest) chartStartTime += earliest - nextTelegraph;
     }
 
     private int PhaseForHealth()

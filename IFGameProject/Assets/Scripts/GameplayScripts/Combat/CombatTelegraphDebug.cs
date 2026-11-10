@@ -14,7 +14,8 @@ public class CombatTelegraphDebug : MonoBehaviour
 
     private static readonly CombatAction[] Answers =
     {
-        CombatAction.DodgeLeft, CombatAction.DodgeRight, CombatAction.Block, CombatAction.Parry
+        CombatAction.DodgeLeft, CombatAction.DodgeRight, CombatAction.Block,
+        CombatAction.RightSwing, CombatAction.LeftSwing, CombatAction.RisingSwing, CombatAction.OverheadSwing
     };
 
     [Header("References")]
@@ -127,9 +128,10 @@ public class CombatTelegraphDebug : MonoBehaviour
         var answers = new StringBuilder();
         foreach (CombatAction action in Answers)
         {
-            if (!enemy.Judge.Rules.Evaluate(action, note.type, note.direction).valid) continue;
+            if (!enemy.Judge.Rules.Evaluate(action, note).valid) continue;
             if (answers.Length > 0) answers.Append(" / ");
             answers.Append(action);
+            if (note.BreaksOn(action)) answers.Append(" (BREAK)");
         }
 
         string hint = answers.Length > 0 ? answers.ToString() : "don't react";

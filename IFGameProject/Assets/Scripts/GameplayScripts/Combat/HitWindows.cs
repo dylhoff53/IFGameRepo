@@ -10,12 +10,12 @@ public class HitWindows
     [Tooltip("Max seconds from impact for a Good.")]
     [Min(0f)] public float good = 0.12f;
 
-    [Tooltip("Max seconds from impact for a Parry to land at all.")]
+    [Tooltip("Max seconds from impact for a swing to parry at all.")]
     [Min(0f)] public float parryWindow = 0.08f;
 
     public float Largest => Mathf.Max(good, parryWindow);
 
-    public float WindowFor(CombatAction action) => action == CombatAction.Parry ? parryWindow : good;
+    public float WindowFor(CombatAction action) => action.IsSwing() ? parryWindow : good;
 
     public bool IsInWindow(double offset, CombatAction action) => Math.Abs(offset) <= WindowFor(action);
 

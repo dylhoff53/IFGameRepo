@@ -18,24 +18,44 @@ MonoBehaviour:
     type: 0
     direction: 0
     damage: 10
+    shieldDamage: 10
     animTrigger: 
+    canBeParried: 1
+    canParryBreak: 0
+    canDodgeBreak: 0
+    canBlockBreak: 0
   - hitTime: 4
     telegraphLead: 0.6
     type: 0
     direction: 1
     damage: 10
+    shieldDamage: 10
     animTrigger: 
+    canBeParried: 1
+    canParryBreak: 0
+    canDodgeBreak: 0
+    canBlockBreak: 0
   - hitTime: 6
     telegraphLead: 0.6
     type: 0
     direction: 2
     damage: 10
+    shieldDamage: 10
     animTrigger: 
+    canBeParried: 1
+    canParryBreak: 0
+    canDodgeBreak: 0
+    canBlockBreak: 0
   - hitTime: 8
     telegraphLead: 0.6
     type: 0
     direction: 3
     damage: 10
+    shieldDamage: 10
     animTrigger: 
+    canBeParried: 1
+    canParryBreak: 1
+    canDodgeBreak: 1
+    canBlockBreak: 1
   loop: 1
   loopGap: 1
